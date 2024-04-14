@@ -23,8 +23,8 @@ class SimpleDrivingEnv(gym.Env):
                 low=np.array([-1, -.6], dtype=np.float32),
                 high=np.array([1, .6], dtype=np.float32))
         self.observation_space = gym.spaces.box.Box(
-            low=np.array([-40, -40], dtype=np.float32),
-            high=np.array([40, 40], dtype=np.float32))
+            low=np.array([-40, -40, -40, -40], dtype=np.float32), # Adding features for distance to nearest obstacle.
+            high=np.array([40, 40, 40, 40], dtype=np.float32))
         self.np_random, _ = gym.utils.seeding.np_random()
 
         if renders:
@@ -79,11 +79,19 @@ class SimpleDrivingEnv(gym.Env):
         reward = -dist_to_goal
         self.prev_dist_to_goal = dist_to_goal
 
+        dist_to_obs = math.sqrt(((carpos[0] - car_ob[2]) ** 2 +
+                                    (carpos[1] - car_ob[3]) ** 2))      
+
+        # Return a bad reward for getting stuck on an obstacle.
+        if dist_to_obs <= 1.5:
+            reward -= -25 - 50*((1.5-dist_to_obs)/1.5) # Assignment 3 Edit, part 4 - penalty for hitting obstacles.
+
         # Done by reaching goal
         if dist_to_goal < 1.5 and not self.reached_goal:
             #print("reached goal")
             self.done = True
             self.reached_goal = True
+            reward = 50 # Assignment 3 Edit, part 3 - reward for reaching goal range.
 
         ob = car_ob
         return ob, reward, self.done, dict()
@@ -109,6 +117,13 @@ class SimpleDrivingEnv(gym.Env):
         self.goal = (x, y)
         self.done = False
         self.reached_goal = False
+
+        # Insert obstacles.
+        self.obstacle = []
+        self.obstacle.append(self._p.loadURDF(fileName='simple-car-env\simple_driving\envs\obstacles\simpleobstacle.urdf', basePosition=[2, 2, 0])) 
+        self.obstacle.append(self._p.loadURDF(fileName='simple-car-env\simple_driving\envs\obstacles\simpleobstacle.urdf', basePosition=[-2, 2, 0])) 
+        self.obstacle.append(self._p.loadURDF(fileName='simple-car-env\simple_driving\envs\obstacles\simpleobstacle.urdf', basePosition=[2, -2, 0])) 
+        self.obstacle.append(self._p.loadURDF(fileName='simple-car-env\simple_driving\envs\obstacles\simpleobstacle.urdf', basePosition=[-2, -2, 0])) 
 
         # Visual element of the goal
         self.goal_object = Goal(self._p, self.goal)
@@ -183,7 +198,23 @@ class SimpleDrivingEnv(gym.Env):
         invCarPos, invCarOrn = self._p.invertTransform(carpos, carorn)
         goalPosInCar, goalOrnInCar = self._p.multiplyTransforms(invCarPos, invCarOrn, goalpos, goalorn)
 
-        observation = [goalPosInCar[0], goalPosInCar[1]]
+        # Adding features for closest obstacles. 
+        close_obs_dist = np.inf
+        close_obs = None
+        obs_x = 0
+        obs_y = 0
+        for obstacle in self.obstacle:
+            obs_pos = self._p.getBasePositionAndOrientation(obstacle)[0]
+            dist_to_obs = math.sqrt(((carpos[0] - obs_pos[0]) ** 2 +
+                                    (carpos[1] - obs_pos[1]) ** 2))          
+            if dist_to_obs < close_obs_dist:
+                close_obs = obstacle
+                close_obs_dist = dist_to_obs
+                obs_x = carpos[0] - obs_pos[0]
+                obs_y = carpos[1] - obs_pos[1]
+        
+
+        observation = [goalPosInCar[0], goalPosInCar[1], obs_x, obs_y]
         return observation
 
     def _termination(self):
